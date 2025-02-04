@@ -6,6 +6,9 @@ import pysolr
 import pyarrow as pa
 import pandas as pd
 
+logger, config = bootstrap()
+configs = config.get_configs()
+
 def fetch_assets_from_postgresql():
     db_config = {
         'dbname': configs.DATABASE_NAME,
@@ -21,11 +24,14 @@ def fetch_assets_from_postgresql():
     cursor.callproc('get_assets')
     assets = cursor.fetchall()
 
+    # Dynamically get column names from cursor.description
+    column_names = [desc[0] for desc in cursor.description]
+
     cursor.close()
     conn.close()
 
     # Using pyarrow to convert fetched data to Arrow Table
-    arrow_table = pa.Table.from_pandas(pd.DataFrame(assets, columns=['asset_id', 'sys_id', 'fac_code']))
+    arrow_table = pa.Table.from_pandas(pd.DataFrame(assets, columns=column_names))
     return arrow_table
 
 def apply_business_logic(arrow_table):
@@ -42,18 +48,13 @@ def update_solr_collection(arrow_table, solr_url):
     print(f"Successfully updated {len(solr_data)} assets in SOLR.")
 
 def main():
-    arrow_table = fetch_assets_from_postgresql()
-    processed_table = apply_business_logic(arrow_table)
-    update_solr_collection(processed_table)
-
-if __name__ == "__main__":
-    logger, config = bootstrap()
-    configs = config.get_configs()
-
     solr_url = f"{configs.SOLR_URL}/{configs.SOLR_COLLECTION_ASSET}"
-    logger.info (f'SOLR_URL: {SOLR_URL}')
+    logger.info (f'SOLR_URL: {solr_url}')
+    asset_data = fetch_assets_from_postgresql()
+    # processed_table = apply_business_logic(asset_data)
+    update_solr_collection(arrow_table=asset_data, solr_url=solr_url)
+
+if __name__ == "__main__":   
     # logger.debug(configs.DATABASE_NAME)
     # configs.as_dict()
-
-    logger.info("Loaded config")
-    fetch_assets_from_postgresql()
+    main()
