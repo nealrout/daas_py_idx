@@ -1,0 +1,10 @@
+daas_py_config @ file:../daas_py_config
+requests
+psycopg2
+python-dotenv
+setuptools
+wheel
+pysolr
+pyarrow
+pandas
+argparse
