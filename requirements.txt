@@ -7,3 +7,4 @@ wheel
 pysolr
 pyarrow
 pandas
+argparse
