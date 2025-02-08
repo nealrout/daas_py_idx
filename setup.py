@@ -9,16 +9,16 @@ def parse_requirements(filename):
     return requirements
 
 setup(
-    name="daas_py_idx_asset",
+    name="daas_py_idx",
     version="0.1.0",
     packages=find_packages(),
     include_package_data=True, 
     author="Neal Routson",
     author_email="nroutson@gmail.com",
-    description="Python project to read data from asset database, and populate SOLR",
+    description="Python project to read data from PostgreSQL database, and populate SOLR.  It uses a NOTIFY/LISTENER to get updates in real-time",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/nealrout/daas_py_idx_asset",
+    url="https://github.com/nealrout/daas_py_idx",
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
