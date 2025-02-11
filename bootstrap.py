@@ -13,15 +13,14 @@ def bootstrap():
         project_path = os.path.abspath(os.path.join(cwd, '..'))
         sys.path.insert(0, project_path)
 
-        from daas_py_common import model
-        from daas_py_common.logging_config import logger
         from daas_py_config import config
+        from daas_py_common import logging_config
 
         # You can call other initialization code here if necessary
-        logger.info("Bootstrap complete")
+        logging_config.logger.info("Bootstrap complete")
 
         # return logger, config.get_configs()
-        return logger, config
+        return logging_config.logger, config
     except Exception as e:
         print(f"Error during bootstrap: {e}")
         return None, None
