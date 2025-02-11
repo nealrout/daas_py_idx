@@ -1,0 +1,14 @@
+# Include all Python source files
+recursive-include daas_py_idx *.py
+
+# Include other non-Python files like env files, JSON, YAML, etc.
+recursive-include daas_py_idx *.json
+recursive-include daas_py_idx *.yaml
+recursive-include daas_py_idx *.env
+
+# Ensure README and requirements are included
+include README.md
+include requirements.txt
+
+# Exclude compiled Python files
+global-exclude __pycache__ *.pyc *.pyo *.pyd
