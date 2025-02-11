@@ -43,7 +43,9 @@ __Set correct directory:__
 python setup.py sdist
 
 ## Features
-- 
+- Full load process to pull all records from DB and update SOLR.
+- Listener to get udpates made in DB for specific domain in real time, then update SOLR.
+- Recovery.  If idx is down for any period of time, it will read events in the event_notification_buffer table, and recover these.
 
 ## Miscellaneous
 
