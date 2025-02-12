@@ -22,6 +22,7 @@ import inspect
 import pyarrow as pa
 import pandas as pd
 import datetime
+import importlib
 
 logger, config = bootstrap()
 configs = config.get_configs()
@@ -130,6 +131,7 @@ def update_solr(arrow_table, solr_url):
 def process_all(solr_url):
     data = get_all()
     # processed_data = apply_business_logic(data)
+    process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
     update_solr(arrow_table=data, solr_url=solr_url)
 
 def event_listener(solr_url):
@@ -197,6 +199,25 @@ def convert_timestamptz_to_date(record):
             # Convert to ISO 8601 format, ensuring UTC
             record[key] = value.astimezone(datetime.timezone.utc).isoformat()
     return record
+
+
+def process_business_logic(module_name, data):
+    logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
+    try:
+        # Dynamically import the module
+        module = importlib.import_module(module_name)
+        
+        # Check if the module has the expected function
+        if hasattr(module, "process"):
+            func = getattr(module, "process")
+            func(data)  # Execute the function
+        else:
+            print(f"Module '{module_name}' does not contain a 'process' function.")
+    except ModuleNotFoundError:
+        print(f"Module '{module_name}' not found.")
+    finally:
+        logger.debug(f"END {inspect.currentframe().f_code.co_name}")
+
 
 if __name__ == "__main__":   
     parser = argparse.ArgumentParser(description=f"Index manager, that either 1.) listens to db events for updates, or 2.) does full load")
