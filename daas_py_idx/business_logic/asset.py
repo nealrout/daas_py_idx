@@ -1,2 +1,3 @@
 def process(data):
-    print(f"Processing asset data: {data}")
+    print (f"process asset data")
+    # print(f"Processing asset data: {data}")
