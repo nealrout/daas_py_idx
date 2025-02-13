@@ -1,5 +1,5 @@
-daas_py_common
 daas_py_config
+daas_py_common
 requests
 psycopg2
 python-dotenv
