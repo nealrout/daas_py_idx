@@ -197,7 +197,9 @@ def convert_timestamptz_to_date(record):
     for key, value in record.items():
         if isinstance(value, datetime.datetime):
             # Convert to ISO 8601 format, ensuring UTC
-            record[key] = value.astimezone(datetime.timezone.utc).isoformat()
+            # record[key] = value.astimezone(datetime.timezone.utc).isoformat()
+            # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
+            record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     return record
 
 
@@ -247,6 +249,7 @@ if __name__ == "__main__":
     DB_PROC_GET_EVENT_NOTIFICATION_BUFFER = configs.DB_PROC_GET_EVENT_NOTIFICATION_BUFFER
     DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER = configs.DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER
 
+    logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
     logger.info(f"DOMAIN: {DOMAIN}")
     solr_url = f"{configs.SOLR_URL}/{getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")}"
     logger.info (f"SOLR_URL: {solr_url}")
