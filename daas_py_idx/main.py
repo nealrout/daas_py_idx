@@ -41,7 +41,7 @@ def setup_connection():
     cursor = conn.cursor()
     return conn, cursor
 
-def get_all(batch_start_ts, batch_end_ts):
+def get_all(batch_start_ts=None, batch_end_ts=None):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
@@ -234,7 +234,6 @@ def process_index_override():
 
         # Dynamically get column names from cursor.description
         column_names = [desc[0] for desc in cursor.description]
-
         # Convert rows to a list of dictionaries
         result_dicts = [dict(zip(column_names, row)) for row in data]
 
@@ -263,8 +262,9 @@ def process_index_override():
             index_override_source_ts = index_override_batch_target_ts
 
         # Delete record from index_override table
-        cursor.execute(f"SELECT * FROM {configs.DB_PROC_CLEAN_INDEX_OVERRIDE}(%s);", [DOMAIN])
-        cursor.fetchall()
+        call_statement = f"CALL {configs.DB_PROC_CLEAN_INDEX_OVERRIDE}(%s)"
+        params = (DOMAIN,)
+        cursor.execute(call_statement, params)
         conn.commit()
 
         return True
