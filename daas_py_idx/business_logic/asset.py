@@ -1,3 +1,3 @@
 def process(data):
-    print (f"process asset data")
+    print (f"ASSET BUSINESS LOGIC")
     # print(f"Processing asset data: {data}")
