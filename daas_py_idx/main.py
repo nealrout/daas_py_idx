@@ -41,11 +41,16 @@ def setup_connection():
     cursor = conn.cursor()
     return conn, cursor
 
-def get_all():
+def get_all(batch_start_ts, batch_end_ts):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
-        cursor.execute(f"SELECT * FROM {DB_PROC_GET}(%s);", [None])
+
+        if batch_start_ts == None and batch_end_ts == None:
+            cursor.execute(f"SELECT * FROM {DB_PROC_GET}(%s);", [None])
+        else:
+            cursor.execute(f"SELECT * FROM {DB_PROC_GET}(%s, %s, %s);", [None, batch_start_ts, batch_end_ts])
+            
         data = cursor.fetchall()
         # Dynamically get column names from cursor.description
         column_names = [desc[0] for desc in cursor.description]
@@ -84,7 +89,7 @@ def clean_event_notification_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
-        cursor.execute(f"SELECT * FROM {DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
+        cursor.execute(f"SELECT * FROM {configs.DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
         conn.commit()
     except Exception as e:
         logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
@@ -129,10 +134,11 @@ def update_solr(arrow_table, solr_url):
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     
 def process_all(solr_url):
-    data = get_all()
-    # processed_data = apply_business_logic(data)
-    process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
-    update_solr(arrow_table=data, solr_url=solr_url)
+    if not process_index_override():
+        data = get_all()
+        # processed_data = apply_business_logic(data)
+        process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
+        update_solr(arrow_table=data, solr_url=solr_url)
 
 def event_listener(solr_url):
     try:
@@ -150,7 +156,7 @@ def event_listener(solr_url):
 
         # Recover updates made while this service was not running
         logger.info(f"Recovering buffered events before enabling listener")
-        listener_cursor.execute(f"SELECT id, channel, payload FROM {DB_PROC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
+        listener_cursor.execute(f"SELECT id, channel, payload FROM {configs.DB_PROC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
         buffered_events = listener_cursor.fetchall()
 
         for event in buffered_events:
@@ -178,7 +184,7 @@ def event_listener(solr_url):
                     update_solr(arrow_table=data, solr_url=solr_url)
 
                     # remove items from event_notification_buffer
-                    json_data_recover= json.dumps({f"{IDX_EVENT_RECOVER_KEY}": notify_recover}) 
+                    json_data_recover= json.dumps({f"{configs.IDX_EVENT_RECOVER_KEY}": notify_recover}) 
                     clean_event_notification_by_id(json_data=json_data_recover)
 
                     # Reset tracking variables
@@ -202,7 +208,6 @@ def convert_timestamptz_to_date(record):
             record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     return record
 
-
 def process_business_logic(module_name, data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
@@ -218,6 +223,57 @@ def process_business_logic(module_name, data):
     except ModuleNotFoundError:
         print(f"Module '{module_name}' not found.")
     finally:
+        logger.debug(f"END {inspect.currentframe().f_code.co_name}")
+
+def process_index_override():
+    logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
+    try:
+        conn, cursor = setup_connection()
+        cursor.execute(f"SELECT * FROM {configs.DB_PROC_GET_INDEX_OVERRIDE}(%s);", [DOMAIN])
+        data = cursor.fetchall()
+
+        # Dynamically get column names from cursor.description
+        column_names = [desc[0] for desc in cursor.description]
+
+        # Convert rows to a list of dictionaries
+        result_dicts = [dict(zip(column_names, row)) for row in data]
+
+        if len(result_dicts) == 0:
+            return False
+        
+        logger.info(f"Index override identified.")
+        logger.info(f"We will batch from {configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS} to {configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS} "\
+                    "in day increments of {configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE}")
+        index_override_source_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS) 
+        index_override_target_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS) 
+        index_override_batch_target_ts = index_override_source_ts
+
+        while index_override_batch_target_ts <= index_override_target_ts:
+            # add the IDX_OVERRIDE_TIMESTEP_DAY_SIZE # of days for batching
+            index_override_batch_target_ts = index_override_source_ts + datetime.timedelta(days=int(configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE))
+
+            logger.info(f"Processing batch: {index_override_source_ts} → {index_override_batch_target_ts}")
+
+            # Fetch data for the batch range
+            data = get_all(batch_start_ts=index_override_source_ts, batch_end_ts=index_override_batch_target_ts)
+            process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
+            update_solr(arrow_table=data, solr_url=solr_url)
+
+            # Move to the next batch (set new source timestamp as the last processed target)
+            index_override_source_ts = index_override_batch_target_ts
+
+        # Delete record from index_override table
+        cursor.execute(f"SELECT * FROM {configs.DB_PROC_CLEAN_INDEX_OVERRIDE}(%s);", [DOMAIN])
+        cursor.fetchall()
+        conn.commit()
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+    finally:
+        cursor.close()
+        conn.close()
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
 
@@ -245,9 +301,7 @@ if __name__ == "__main__":
     IDX_BUFFER_SIZE = getattr(configs, f"IDX_BUFFER_SIZE_{DOMAIN}")
     IDX_BUFFER_DURATION = getattr(configs, f"IDX_BUFFER_DURATION_{DOMAIN}")
     IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
-    IDX_EVENT_RECOVER_KEY = configs.IDX_EVENT_RECOVER_KEY
-    DB_PROC_GET_EVENT_NOTIFICATION_BUFFER = configs.DB_PROC_GET_EVENT_NOTIFICATION_BUFFER
-    DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER = configs.DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER
+    DB_PROC_CLEAN_INDEX_OVERRIDE = configs.DB_PROC_CLEAN_INDEX_OVERRIDE
 
     logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
     logger.info(f"DOMAIN: {DOMAIN}")
