@@ -47,9 +47,9 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
         conn, cursor = setup_connection()
 
         if batch_start_ts == None and batch_end_ts == None:
-            cursor.execute(f"SELECT * FROM {DB_PROC_GET}(%s);", [None])
+            cursor.execute(f"SELECT * FROM {DB_FUNC_GET}(%s);", [None])
         else:
-            cursor.execute(f"SELECT * FROM {DB_PROC_GET}(%s, %s, %s);", [None, batch_start_ts, batch_end_ts])
+            cursor.execute(f"SELECT * FROM {DB_FUNC_GET}(%s, %s, %s);", [None, batch_start_ts, batch_end_ts])
             
         data = cursor.fetchall()
         # Dynamically get column names from cursor.description
@@ -70,7 +70,7 @@ def get_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
-        cursor.execute(f"SELECT * FROM {DB_PROC_GET_BY_ID}(%s, %s);", [json_data, None])
+        cursor.execute(f"SELECT * FROM {DB_FUNC_GET_BY_ID}(%s, %s);", [json_data, None])
         data = cursor.fetchall()
 
         # Dynamically get column names from cursor.description
@@ -89,7 +89,7 @@ def clean_event_notification_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
-        cursor.execute(f"SELECT * FROM {configs.DB_PROC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
+        cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
         conn.commit()
     except Exception as e:
         logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
@@ -156,7 +156,7 @@ def event_listener(solr_url):
 
         # Recover updates made while this service was not running
         logger.info(f"Recovering buffered events before enabling listener")
-        listener_cursor.execute(f"SELECT id, channel, payload FROM {configs.DB_PROC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
+        listener_cursor.execute(f"SELECT id, channel, payload FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
         buffered_events = listener_cursor.fetchall()
 
         for event in buffered_events:
@@ -229,7 +229,7 @@ def process_index_override():
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = setup_connection()
-        cursor.execute(f"SELECT * FROM {configs.DB_PROC_GET_INDEX_OVERRIDE}(%s);", [DOMAIN])
+        cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_INDEX_OVERRIDE}(%s);", [DOMAIN])
         data = cursor.fetchall()
 
         # Dynamically get column names from cursor.description
@@ -262,7 +262,7 @@ def process_index_override():
             index_override_source_ts = index_override_batch_target_ts
 
         # Delete record from index_override table
-        call_statement = f"CALL {configs.DB_PROC_CLEAN_INDEX_OVERRIDE}(%s)"
+        call_statement = f"CALL {configs.DB_FUNC_CLEAN_INDEX_OVERRIDE}(%s)"
         params = (DOMAIN,)
         cursor.execute(call_statement, params)
         conn.commit()
@@ -296,12 +296,12 @@ if __name__ == "__main__":
     SOLR_COLLECTION = getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")
     SOLR_URL = f"{configs.SOLR_URL}/{SOLR_COLLECTION}"
     DB_CHANNEL = getattr(configs, f"DB_CHANNEL_{DOMAIN}")
-    DB_PROC_GET_BY_ID = getattr(configs, f"DB_PROC_GET_BY_ID_{DOMAIN}")
-    DB_PROC_GET = getattr(configs, f"DB_PROC_GET_{DOMAIN}")
+    DB_FUNC_GET_BY_ID = getattr(configs, f"DB_FUNC_GET_BY_ID_{DOMAIN}")
+    DB_FUNC_GET = getattr(configs, f"DB_FUNC_GET_{DOMAIN}")
     IDX_BUFFER_SIZE = getattr(configs, f"IDX_BUFFER_SIZE_{DOMAIN}")
     IDX_BUFFER_DURATION = getattr(configs, f"IDX_BUFFER_DURATION_{DOMAIN}")
     IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
-    DB_PROC_CLEAN_INDEX_OVERRIDE = configs.DB_PROC_CLEAN_INDEX_OVERRIDE
+    DB_FUNC_CLEAN_INDEX_OVERRIDE = configs.DB_FUNC_CLEAN_INDEX_OVERRIDE
 
     logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
     logger.info(f"DOMAIN: {DOMAIN}")
