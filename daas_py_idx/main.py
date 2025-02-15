@@ -72,11 +72,11 @@ def get_by_id(json_data):
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     return arrow_table
 
-def clean_event_notification_by_id(json_data):
+def clean_event_notification_by_id(json_data, channel_name):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         conn, cursor = utilities.setup_connection()
-        cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
+        cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s, %s);", [json_data, channel_name])
         conn.commit()
     except Exception as e:
         logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
@@ -136,7 +136,7 @@ def event_listener(solr_url):
             notification_id, channel, payload = event
 
             logger.debug(f"notification_id: {notification_id}, channel: {channel}, payload: {payload}")
-            notify_recover.append(notification_id)
+            # notify_recover.append(payload)
             notify_buffer.append(payload)
 
         logger.info(f"Recovering {len(notify_buffer)} buffered_events")
@@ -157,8 +157,8 @@ def event_listener(solr_url):
                     update_solr(arrow_table=data, solr_url=solr_url)
 
                     # remove items from event_notification_buffer
-                    json_data_recover= json.dumps({f"{configs.IDX_EVENT_RECOVER_KEY}": notify_recover}) 
-                    clean_event_notification_by_id(json_data=json_data_recover)
+                    logger.debug(json_data)
+                    clean_event_notification_by_id(json_data=json_data, channel_name=DB_CHANNEL)
 
                     # Reset tracking variables
                     notify_buffer.clear()
@@ -271,6 +271,15 @@ if __name__ == "__main__":
     IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
 
     logger.info(f"DOMAIN: {DOMAIN}")
+    logger.debug(f"SOLR_COLLECTION: {SOLR_COLLECTION}")
+    logger.debug(f"SOLR_URL: {IDX_FETCH_KEY}")
+    logger.debug(f"DB_CHANNEL: {DB_CHANNEL}")
+    logger.debug(f"DB_FUNC_GET_BY_ID: {DB_FUNC_GET_BY_ID}")
+    logger.debug(f"DB_FUNC_GET: {DB_FUNC_GET}")
+    logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
+    logger.debug(f"IDX_BUFFER_DURATION: {IDX_BUFFER_DURATION}")
+    logger.debug(f"IDX_FETCH_KEY: {IDX_FETCH_KEY}")
+    
     solr_url = f"{configs.SOLR_URL}/{getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")}"
     logger.info (f"SOLR_URL: {solr_url}")
 
