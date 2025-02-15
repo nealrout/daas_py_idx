@@ -14,6 +14,7 @@ import sys
 import os
 import time
 from bootstrap import bootstrap
+from util import utilities
 import psycopg2
 import pysolr
 import json
@@ -27,27 +28,13 @@ import importlib
 logger, config = bootstrap()
 configs = config.get_configs()
 
-def setup_connection():
-    db_config = {
-    "dbname": configs.DATABASE_NAME,
-    "user": config.get_secret("DATABASE_USER"),
-    "password": config.get_secret("DATABASE_PASSWORD"),
-    "host": configs.DATABASE_HOST,
-    "port": configs.DATABASE_PORT,
-    "options": f"-c search_path={configs.DATABASE_SCHEMA}"
-}
-    
-    conn = psycopg2.connect(**db_config)
-    cursor = conn.cursor()
-    return conn, cursor
-
 def get_all(batch_start_ts=None, batch_end_ts=None):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = setup_connection()
+        conn, cursor = utilities.setup_connection()
 
         if batch_start_ts == None and batch_end_ts == None:
-            cursor.execute(f"SELECT * FROM {DB_FUNC_GET}(%s);", [None])
+            cursor.execute(f"SELECT * FROM {DB_FUNC_GET}();", [])
         else:
             cursor.execute(f"SELECT * FROM {DB_FUNC_GET}(%s, %s, %s);", [None, batch_start_ts, batch_end_ts])
             
@@ -69,7 +56,7 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
 def get_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = setup_connection()
+        conn, cursor = utilities.setup_connection()
         cursor.execute(f"SELECT * FROM {DB_FUNC_GET_BY_ID}(%s, %s);", [json_data, None])
         data = cursor.fetchall()
 
@@ -88,7 +75,7 @@ def get_by_id(json_data):
 def clean_event_notification_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = setup_connection()
+        conn, cursor = utilities.setup_connection()
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s);", [json_data])
         conn.commit()
     except Exception as e:
@@ -96,19 +83,6 @@ def clean_event_notification_by_id(json_data):
     finally:
         cursor.close()
         conn.close()
-        logger.debug(f"END {inspect.currentframe().f_code.co_name}")
-
-def apply_business_logic(arrow_table):
-    try:
-        logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
-        #Not used yet.
-        df = arrow_table.to_pandas()
-        # df.loc[df["category"] == "Real Estate", "value"] *= 1.10
-        logger.debug(f"END {inspect.currentframe().f_code.co_name}")
-        return pa.Table.from_pandas(df)
-    except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
-    finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
 def update_solr(arrow_table, solr_url):
@@ -124,7 +98,7 @@ def update_solr(arrow_table, solr_url):
 
         # Format records (timestamptz) to be compatible with solr
         for record in solr_data:
-            record = convert_timestamptz_to_date(record)
+            record = utilities.convert_timestamptz_to_date(record)
 
         solr.add(solr_data)
         logger.info(f"Successfully updated {len(solr_data)} documents in SOLR.")
@@ -136,16 +110,15 @@ def update_solr(arrow_table, solr_url):
 def process_all(solr_url):
     if not process_index_override():
         data = get_all()
-        # processed_data = apply_business_logic(data)
-        process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
+        process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
         update_solr(arrow_table=data, solr_url=solr_url)
 
 def event_listener(solr_url):
     try:
-        listener_conn, listener_cursor = setup_connection()
+        listener_conn, listener_cursor = utilities.setup_connection()
         listener_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
-        reader_conn, reader_cursor = setup_connection()
+        reader_conn, reader_cursor = utilities.setup_connection()
 
         listener_cursor.execute(f"LISTEN {DB_CHANNEL};")
         logger.info(f"Listening for {DB_CHANNEL} events...")
@@ -180,7 +153,7 @@ def event_listener(solr_url):
 
                     json_data = json.dumps({f"{IDX_FETCH_KEY}": notify_buffer}) 
                     data = get_by_id(json_data=json_data)
-                    # processed_data = apply_business_logic(data)
+                    process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
                     update_solr(arrow_table=data, solr_url=solr_url)
 
                     # remove items from event_notification_buffer
@@ -199,20 +172,11 @@ def event_listener(solr_url):
         reader_conn.close()
         reader_cursor.close()
 
-def convert_timestamptz_to_date(record):
-    for key, value in record.items():
-        if isinstance(value, datetime.datetime):
-            # Convert to ISO 8601 format, ensuring UTC
-            # record[key] = value.astimezone(datetime.timezone.utc).isoformat()
-            # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
-            record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-    return record
-
 def process_business_logic(module_name, data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
         # Dynamically import the module
-        module = importlib.import_module(module_name)
+        module = importlib.import_module(module_name.lower())
         
         # Check if the module has the expected function
         if hasattr(module, "process"):
@@ -228,7 +192,7 @@ def process_business_logic(module_name, data):
 def process_index_override():
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = setup_connection()
+        conn, cursor = utilities.setup_connection()
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_INDEX_OVERRIDE}(%s);", [DOMAIN])
         data = cursor.fetchall()
 
@@ -240,6 +204,10 @@ def process_index_override():
         if len(result_dicts) == 0:
             return False
         
+        # This feature is to suppliment the "full" load, where a single pull is too much.  It will read the
+        # index_override table, which has a domain, a source timestamp and target timestamp.  It will batch
+        # the load into day increments in the IDX_OVERRIDE_TIMESTEP_DAY_SIZE configuration.  The default is 7.
+        # So this means it will fetch 7 days of data at a time until we reach the target timestamp.
         logger.info(f"Index override identified.")
         logger.info(f"We will batch from {configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS} to {configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS} "\
                     "in day increments of {configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE}")
@@ -255,13 +223,13 @@ def process_index_override():
 
             # Fetch data for the batch range
             data = get_all(batch_start_ts=index_override_source_ts, batch_end_ts=index_override_batch_target_ts)
-            process_business_logic(module_name=f"business_logic.{DOMAIN.lower()}", data=data)
+            process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
             update_solr(arrow_table=data, solr_url=solr_url)
 
             # Move to the next batch (set new source timestamp as the last processed target)
             index_override_source_ts = index_override_batch_target_ts
 
-        # Delete record from index_override table
+        # Archive record from index_override table
         call_statement = f"CALL {configs.DB_FUNC_CLEAN_INDEX_OVERRIDE}(%s)"
         params = (DOMAIN,)
         cursor.execute(call_statement, params)
@@ -301,9 +269,7 @@ if __name__ == "__main__":
     IDX_BUFFER_SIZE = getattr(configs, f"IDX_BUFFER_SIZE_{DOMAIN}")
     IDX_BUFFER_DURATION = getattr(configs, f"IDX_BUFFER_DURATION_{DOMAIN}")
     IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
-    DB_FUNC_CLEAN_INDEX_OVERRIDE = configs.DB_FUNC_CLEAN_INDEX_OVERRIDE
 
-    logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
     logger.info(f"DOMAIN: {DOMAIN}")
     solr_url = f"{configs.SOLR_URL}/{getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")}"
     logger.info (f"SOLR_URL: {solr_url}")
