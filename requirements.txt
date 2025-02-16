@@ -9,3 +9,4 @@ pysolr
 pyarrow
 pandas
 argparse
+numpy
