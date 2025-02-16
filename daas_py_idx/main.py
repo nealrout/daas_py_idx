@@ -127,7 +127,6 @@ def update_solr(arrow_table, solr_url):
                     except json.JSONDecodeError:
                         pass  # Ignore if it fails
 
-        print(solr_data)
         solr.add(solr_data)
         logger.info(f"Successfully updated {len(solr_data)} documents in SOLR.")
     except Exception as e:
@@ -211,9 +210,9 @@ def process_business_logic(module_name, data):
             func = getattr(module, "process")
             func(data)  # Execute the function
         else:
-            print(f"Module '{module_name}' does not contain a 'process' function.")
+            logger.warning(f"Module '{module_name}' does not contain a 'process' function.")
     except ModuleNotFoundError:
-        print(f"Module '{module_name}' not found.")
+        logger.warning(f"Module '{module_name}' not found.")
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
