@@ -274,7 +274,7 @@ def process_index_override():
 
 if __name__ == "__main__":   
     parser = argparse.ArgumentParser(description=f"Index manager, that either 1.) listens to db events for updates, or 2.) does full load")
-    parser.add_argument("-d", "--domain", help="Domain name i.e. asset, facility...", required=False, default=configs.DOMAIN_NAME_ASSET, type=str)
+    parser.add_argument("-d", "--domain", help="Domain name i.e. account, facility, asset,", required=False, type=str)
     parser.add_argument("-l", "--listener", help="Start listener", required=False, action="store_true")
     parser.add_argument("-f", "--full", help="Full load", required=False, action="store_true")
     args = parser.parse_args()
