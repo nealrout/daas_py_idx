@@ -24,6 +24,7 @@ import pyarrow as pa
 import pandas as pd
 import datetime
 import importlib
+import numpy as np
 
 logger, config = bootstrap()
 configs = config.get_configs()
@@ -41,8 +42,15 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
         data = cursor.fetchall()
         # Dynamically get column names from cursor.description
         column_names = [desc[0] for desc in cursor.description]
-        # Using pyarrow to convert fetched data to Arrow Table
-        arrow_table = pa.Table.from_pandas(pd.DataFrame(data, columns=column_names))
+        
+        # pyarrow does not support jsonb, so we have to convert to string on those fields.
+        df = pd.DataFrame(
+            [[utilities.convert_jsonb(value) for value in row] for row in data], 
+            columns=column_names
+        )
+
+        # Convert DataFrame to Arrow Table
+        arrow_table = pa.Table.from_pandas(df)
 
     except Exception as e:
         logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
@@ -62,8 +70,15 @@ def get_by_id(json_data):
 
         # Dynamically get column names from cursor.description
         column_names = [desc[0] for desc in cursor.description]
-        # Using pyarrow to convert fetched data to Arrow Table
-        arrow_table = pa.Table.from_pandas(pd.DataFrame(data, columns=column_names))
+
+        # pyarrow does not support jsonb, so we have to convert to string on those fields.
+        df = pd.DataFrame(
+            [[utilities.convert_jsonb(value) for value in row] for row in data], 
+            columns=column_names
+        )
+
+        # Convert DataFrame to Arrow Table
+        arrow_table = pa.Table.from_pandas(df)
     except Exception as e:
         logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
@@ -96,10 +111,23 @@ def update_solr(arrow_table, solr_url):
         # Convert Arrow Table back to DataFrame and then to dict for SOLR
         solr_data = arrow_table.to_pandas().to_dict(orient="records")
 
-        # Format records (timestamptz) to be compatible with solr
+        # Format records (timestamptz) to be compatible with Solr
         for record in solr_data:
-            record = utilities.convert_timestamptz_to_date(record)
+            utilities.convert_timestamptz_to_date(record)
 
+            # Convert all NumPy arrays and JSONB lists to Python lists
+            for key, value in record.items():
+                if isinstance(value, np.ndarray):  # NumPy arrays
+                    record[key] = value.tolist()
+                elif isinstance(value, str):  # Check if it's still a JSON string
+                    try:
+                        json_value = json.loads(value)
+                        if isinstance(json_value, list):  # Convert only if it's a list
+                            record[key] = json_value
+                    except json.JSONDecodeError:
+                        pass  # Ignore if it fails
+
+        print(solr_data)
         solr.add(solr_data)
         logger.info(f"Successfully updated {len(solr_data)} documents in SOLR.")
     except Exception as e:
@@ -244,7 +272,6 @@ def process_index_override():
         conn.close()
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
-
 if __name__ == "__main__":   
     parser = argparse.ArgumentParser(description=f"Index manager, that either 1.) listens to db events for updates, or 2.) does full load")
     parser.add_argument("-d", "--domain", help="Domain name i.e. asset, facility...", required=False, default=configs.DOMAIN_NAME_ASSET, type=str)
@@ -252,10 +279,10 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--full", help="Full load", required=False, action="store_true")
     args = parser.parse_args()
 
-    if  os.getenv("DOMAIN"):
-        DOMAIN = os.getenv("DOMAIN").upper().strip().replace("'", "")
-    else:
+    if args.domain is not None:
         DOMAIN = args.domain.upper().upper().strip().replace("'", "")
+    elif os.getenv("DOMAIN"):
+        DOMAIN = os.getenv("DOMAIN").upper().strip().replace("'", "")
 
     if DOMAIN == None:
         logger.error(f"Cannot location DOMAIN: {args.domain.upper()}")

@@ -1,6 +1,7 @@
 import psycopg2
 import datetime
 from main import config
+import json
 
 configs = config.get_configs()
 
@@ -28,3 +29,21 @@ def convert_timestamptz_to_date(record):
             # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
             record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     return record
+
+
+# def convert_jsonb(value):
+#     if isinstance(value, dict) or isinstance(value, list):  # Handle native Python JSON structures
+#         return json.dumps(value)
+#     return value  # Return unchanged if not JSON
+
+def convert_jsonb(value):
+    """Convert JSONB field to a format compatible with Pandas and Solr."""
+    if isinstance(value, str):  # If it's a JSON string, try to decode it
+        try:
+            decoded_value = json.loads(value)
+            if isinstance(decoded_value, list):  # Ensure it's a list
+                return decoded_value
+            return value  # If not a list, return as-is
+        except json.JSONDecodeError:
+            return value  # Return as-is if it can't be decoded
+    return value  # Return as-is if not a string
