@@ -103,7 +103,12 @@ def clean_event_notification_by_id(json_data, channel_name):
 def update_solr(arrow_table, solr_url):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        solr = pysolr.Solr(solr_url)
+        solr = pysolr.Solr(
+            solr_url,
+            always_commit=True,  # Automatically commits changes
+            timeout=10,          # Optional: Set timeout
+            auth=(config.get_secret("SOLR_USER"), config.get_secret("SOLR_PASSWORD"))  # ✅ Add Basic Authentication
+        )
 
         if arrow_table == None:
             logger.warning(f"No records passed to {inspect.currentframe().f_code.co_name}")
