@@ -1,12 +1,12 @@
 import psycopg2
 import datetime
-from main import config
+# from main import config
 import json
 
-configs = config.get_configs()
+# configs = config.get_configs()
 
-
-def setup_connection():
+def setup_connection(config):
+    configs = config.get_configs()
     db_config = {
     "dbname": configs.DATABASE_NAME,
     "user": config.get_secret("DATABASE_USER"),
@@ -20,7 +20,6 @@ def setup_connection():
     cursor = conn.cursor()
     return conn, cursor
 
-
 def convert_timestamptz_to_date(record):
     for key, value in record.items():
         if isinstance(value, datetime.datetime):
@@ -29,7 +28,6 @@ def convert_timestamptz_to_date(record):
             # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
             record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     return record
-
 
 # def convert_jsonb(value):
 #     if isinstance(value, dict) or isinstance(value, list):  # Handle native Python JSON structures
