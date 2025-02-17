@@ -26,13 +26,10 @@ import datetime
 import importlib
 import numpy as np
 
-logger, config = bootstrap()
-configs = config.get_configs()
-
 def get_all(batch_start_ts=None, batch_end_ts=None):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = utilities.setup_connection()
+        conn, cursor = utilities.setup_connection(config=config)
 
         if batch_start_ts == None and batch_end_ts == None:
             cursor.execute(f"SELECT * FROM {DB_FUNC_GET}();", [])
@@ -64,7 +61,7 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
 def get_by_id(json_data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = utilities.setup_connection()
+        conn, cursor = utilities.setup_connection(config=config)
         cursor.execute(f"SELECT * FROM {DB_FUNC_GET_BY_ID}(%s, %s);", [json_data, None])
         data = cursor.fetchall()
 
@@ -90,7 +87,7 @@ def get_by_id(json_data):
 def clean_event_notification_by_id(json_data, channel_name):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = utilities.setup_connection()
+        conn, cursor = utilities.setup_connection(config=config)
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s, %s);", [json_data, channel_name])
         conn.commit()
     except Exception as e:
@@ -147,10 +144,10 @@ def process_all(solr_url):
 
 def event_listener(solr_url):
     try:
-        listener_conn, listener_cursor = utilities.setup_connection()
+        listener_conn, listener_cursor = utilities.setup_connection(config=config)
         listener_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
-        reader_conn, reader_cursor = utilities.setup_connection()
+        reader_conn, reader_cursor = utilities.setup_connection(config=config)
 
         listener_cursor.execute(f"LISTEN {DB_CHANNEL};")
         logger.info(f"Listening for {DB_CHANNEL} events...")
@@ -224,7 +221,7 @@ def process_business_logic(module_name, data):
 def process_index_override():
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
-        conn, cursor = utilities.setup_connection()
+        conn, cursor = utilities.setup_connection(config=config)
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_INDEX_OVERRIDE}(%s);", [DOMAIN])
         data = cursor.fetchall()
 
@@ -276,7 +273,10 @@ def process_index_override():
         conn.close()
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
-if __name__ == "__main__":   
+if __name__ == "__main__": 
+    logger, config = bootstrap()
+    configs = config.get_configs()  
+
     parser = argparse.ArgumentParser(description=f"Index manager, that either 1.) listens to db events for updates, or 2.) does full load")
     parser.add_argument("-d", "--domain", help="Domain name i.e. account, facility, asset,", required=False, type=str)
     parser.add_argument("-l", "--listener", help="Start listener", required=False, action="store_true")
