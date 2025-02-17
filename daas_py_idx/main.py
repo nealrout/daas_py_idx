@@ -294,7 +294,7 @@ if __name__ == "__main__":
     DB_FUNC_GET = getattr(configs, f"DB_FUNC_GET_{DOMAIN}")
     IDX_BUFFER_SIZE = getattr(configs, f"IDX_BUFFER_SIZE_{DOMAIN}")
     IDX_BUFFER_DURATION = getattr(configs, f"IDX_BUFFER_DURATION_{DOMAIN}")
-    IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
+    IDX_FETCH_KEY = configs.IDX_FETCH_KEY
 
     logger.info(f"DOMAIN: {DOMAIN}")
     logger.debug(f"SOLR_COLLECTION: {SOLR_COLLECTION}")
