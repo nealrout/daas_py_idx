@@ -50,7 +50,7 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
         arrow_table = pa.Table.from_pandas(df)
 
     except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -58,9 +58,11 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
 
     return arrow_table
 
-def get_by_id(json_data):
+def get_by_id(notify_buffer):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
+        json_data = json.dumps({f"{IDX_FETCH_KEY}": notify_buffer}) 
+
         conn, cursor = utilities.setup_connection(config=config)
         cursor.execute(f"SELECT * FROM {DB_FUNC_GET_BY_ID}(%s, %s);", [json_data, None])
         data = cursor.fetchall()
@@ -77,21 +79,23 @@ def get_by_id(json_data):
         # Convert DataFrame to Arrow Table
         arrow_table = pa.Table.from_pandas(df)
     except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     return arrow_table
 
-def clean_event_notification_by_id(json_data, channel_name):
+def clean_event_notification_by_id(notify_buffer, channel_name):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
+        json_data = json.dumps({f"{IDX_EVENT_FETCH_KEY}": notify_buffer}) 
+
         conn, cursor = utilities.setup_connection(config=config)
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s, %s);", [json_data, channel_name])
         conn.commit()
     except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -132,7 +136,7 @@ def update_solr(arrow_table, solr_url):
         solr.add(solr_data)
         logger.info(f"Successfully updated {len(solr_data)} documents in SOLR.")
     except Exception as e:
-        logger.error(f"Error in {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     
@@ -153,19 +157,17 @@ def event_listener(solr_url):
         logger.info(f"Listening for {DB_CHANNEL} events...")
 
         notify_buffer = []
-        notify_recover = []
         last_executed_time = time.time()
 
         # Recover updates made while this service was not running
         logger.info(f"Recovering buffered events before enabling listener")
-        listener_cursor.execute(f"SELECT id, channel, payload FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
+        listener_cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
         buffered_events = listener_cursor.fetchall()
 
         for event in buffered_events:
-            notification_id, channel, payload = event
+            notification_id, channel, payload, *extra_columns = event
 
             logger.debug(f"notification_id: {notification_id}, channel: {channel}, payload: {payload}")
-            # notify_recover.append(payload)
             notify_buffer.append(payload)
 
         logger.info(f"Recovering {len(notify_buffer)} buffered_events")
@@ -174,27 +176,25 @@ def event_listener(solr_url):
             listener_conn.poll()
             while listener_conn.notifies:
                 notify = listener_conn.notifies.pop(0)
-                logger.debug(f"🔔 {DB_CHANNEL} Change Detected: {notify.payload}")
+                logger.debug(f"🔔 {DB_CHANNEL} Change Detected: {notify.payload} 🔔")
                 notify_buffer.append(notify.payload)
 
             if len(notify_buffer) > int(IDX_BUFFER_SIZE) or (time.time() - last_executed_time >= int(IDX_BUFFER_DURATION)):
                 if notify_buffer:
 
-                    json_data = json.dumps({f"{IDX_FETCH_KEY}": notify_buffer}) 
-                    data = get_by_id(json_data=json_data)
+                    data = get_by_id(notify_buffer=notify_buffer)
                     process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
                     update_solr(arrow_table=data, solr_url=solr_url)
 
                     # remove items from event_notification_buffer
-                    logger.debug(json_data)
-                    clean_event_notification_by_id(json_data=json_data, channel_name=DB_CHANNEL)
+                    clean_event_notification_by_id(notify_buffer=notify_buffer, channel_name=DB_CHANNEL)
 
                     # Reset tracking variables
                     notify_buffer.clear()
                     last_executed_time = time.time()
 
     except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         listener_conn.close()
         listener_cursor.close()
@@ -237,8 +237,8 @@ def process_index_override():
         # index_override table, which has a domain, a source timestamp and target timestamp.  It will batch
         # the load into day increments in the IDX_OVERRIDE_TIMESTEP_DAY_SIZE configuration.  The default is 7.
         # So this means it will fetch 7 days of data at a time until we reach the target timestamp.
-        logger.info(f"Index override identified.")
-        logger.info(f"We will batch from {configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS} to {configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS} "\
+        logger.info(f"🔄 Index override identified.")
+        logger.info(f"🔄 We will batch from {configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS} to {configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS} "\
                     "in day increments of {configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE}")
         index_override_source_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS) 
         index_override_target_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS) 
@@ -248,7 +248,7 @@ def process_index_override():
             # add the IDX_OVERRIDE_TIMESTEP_DAY_SIZE # of days for batching
             index_override_batch_target_ts = index_override_source_ts + datetime.timedelta(days=int(configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE))
 
-            logger.info(f"Processing batch: {index_override_source_ts} → {index_override_batch_target_ts}")
+            logger.info(f"🔄 Processing batch: {index_override_source_ts} → {index_override_batch_target_ts}")
 
             # Fetch data for the batch range
             data = get_all(batch_start_ts=index_override_source_ts, batch_end_ts=index_override_batch_target_ts)
@@ -267,7 +267,7 @@ def process_index_override():
         return True
 
     except Exception as e:
-        logger.error(f"Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -275,7 +275,7 @@ def process_index_override():
 
 if __name__ == "__main__": 
     logger, config = bootstrap()
-    configs = config.get_configs()  
+    configs = config.get_configs()
 
     parser = argparse.ArgumentParser(description=f"Index manager, that either 1.) listens to db events for updates, or 2.) does full load")
     parser.add_argument("-d", "--domain", help="Domain name i.e. account, facility, asset,", required=False, type=str)
@@ -289,7 +289,7 @@ if __name__ == "__main__":
         DOMAIN = os.getenv("DOMAIN").upper().strip().replace("'", "")
 
     if DOMAIN == None:
-        logger.error(f"Cannot location DOMAIN: {args.domain.upper()}")
+        logger.error(f"❌Cannot location DOMAIN: {args.domain.upper()}")
         sys.exit(1)
 
     SOLR_COLLECTION = getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")
@@ -299,20 +299,23 @@ if __name__ == "__main__":
     DB_FUNC_GET = getattr(configs, f"DB_FUNC_GET_{DOMAIN}")
     IDX_BUFFER_SIZE = getattr(configs, f"IDX_BUFFER_SIZE_{DOMAIN}")
     IDX_BUFFER_DURATION = getattr(configs, f"IDX_BUFFER_DURATION_{DOMAIN}")
-    IDX_FETCH_KEY = configs.IDX_FETCH_KEY
+    IDX_FETCH_KEY = getattr(configs, f"IDX_FETCH_KEY_{DOMAIN}")
+    IDX_EVENT_FETCH_KEY = configs.IDX_EVENT_FETCH_KEY
 
     logger.info(f"DOMAIN: {DOMAIN}")
     logger.debug(f"SOLR_COLLECTION: {SOLR_COLLECTION}")
-    logger.debug(f"SOLR_URL: {IDX_FETCH_KEY}")
+    logger.debug(f"SOLR_URL: {IDX_EVENT_FETCH_KEY}")
     logger.debug(f"DB_CHANNEL: {DB_CHANNEL}")
     logger.debug(f"DB_FUNC_GET_BY_ID: {DB_FUNC_GET_BY_ID}")
     logger.debug(f"DB_FUNC_GET: {DB_FUNC_GET}")
     logger.debug(f"IDX_BUFFER_SIZE: {IDX_BUFFER_SIZE}")
     logger.debug(f"IDX_BUFFER_DURATION: {IDX_BUFFER_DURATION}")
+    logger.debug(f"IDX_EVENT_FETCH_KEY: {IDX_EVENT_FETCH_KEY}")
     logger.debug(f"IDX_FETCH_KEY: {IDX_FETCH_KEY}")
     
     solr_url = f"{configs.SOLR_URL}/{getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")}"
     logger.info (f"SOLR_URL: {solr_url}")
+    logger.warning (f"SOLR_URL: {solr_url}")
 
     if args.full:
         process_all(solr_url=solr_url)
