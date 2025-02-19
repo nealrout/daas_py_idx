@@ -67,6 +67,8 @@ def get_by_id(notify_buffer):
         cursor.execute(f"SELECT * FROM {DB_FUNC_GET_BY_ID}(%s, %s);", [json_data, None])
         data = cursor.fetchall()
 
+        logger.debug(f"{len(data)} records received from {DB_FUNC_GET_BY_ID}")
+
         # Dynamically get column names from cursor.description
         column_names = [desc[0] for desc in cursor.description]
 
@@ -134,7 +136,7 @@ def update_solr(arrow_table, solr_url):
                         pass  # Ignore if it fails
 
         solr.add(solr_data)
-        logger.info(f"Successfully updated {len(solr_data)} documents in SOLR.")
+        logger.info(f"{len(solr_data)} documents successfully updated in SOLR.")
     except Exception as e:
         logger.error(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
     finally:
@@ -151,7 +153,7 @@ def event_listener(solr_url):
         listener_conn, listener_cursor = utilities.setup_connection(config=config)
         listener_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
-        reader_conn, reader_cursor = utilities.setup_connection(config=config)
+        # reader_conn, reader_cursor = utilities.setup_connection(config=config)
 
         listener_cursor.execute(f"LISTEN {DB_CHANNEL};")
         logger.info(f"Listening for {DB_CHANNEL} events...")
@@ -162,15 +164,15 @@ def event_listener(solr_url):
         # Recover updates made while this service was not running
         logger.info(f"Recovering buffered events before enabling listener")
         listener_cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
-        buffered_events = listener_cursor.fetchall()
+        buffered_event_data = listener_cursor.fetchall()
+        
+        logger.debug(f"{len(buffered_event_data)} records received on channel {DB_CHANNEL} from {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}")
 
-        for event in buffered_events:
+        for event in buffered_event_data:
             notification_id, channel, payload, *extra_columns = event
 
             logger.debug(f"notification_id: {notification_id}, channel: {channel}, payload: {payload}")
             notify_buffer.append(payload)
-
-        logger.info(f"Recovering {len(notify_buffer)} buffered_events")
 
         while True:
             listener_conn.poll()
@@ -198,8 +200,8 @@ def event_listener(solr_url):
     finally:
         listener_conn.close()
         listener_cursor.close()
-        reader_conn.close()
-        reader_cursor.close()
+        # reader_conn.close()
+        # reader_cursor.close()
 
 def process_business_logic(module_name, data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
@@ -315,7 +317,6 @@ if __name__ == "__main__":
     
     solr_url = f"{configs.SOLR_URL}/{getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")}"
     logger.info (f"SOLR_URL: {solr_url}")
-    logger.warning (f"SOLR_URL: {solr_url}")
 
     if args.full:
         process_all(solr_url=solr_url)
