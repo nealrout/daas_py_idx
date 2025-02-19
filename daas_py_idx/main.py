@@ -106,9 +106,9 @@ def update_solr(arrow_table, solr_url):
     try:
         solr = pysolr.Solr(
             solr_url,
-            always_commit=True,  # Automatically commits changes
-            timeout=10,          # Optional: Set timeout
-            auth=(config.get_secret("SOLR_USER"), config.get_secret("SOLR_PASSWORD"))  # ✅ Add Basic Authentication
+            always_commit=True,
+            timeout=10,
+            auth=(config.get_secret("SOLR_USER"), config.get_secret("SOLR_PASSWORD")) 
         )
 
         if arrow_table == None:
