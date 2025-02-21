@@ -25,6 +25,7 @@ import pandas as pd
 import datetime
 import importlib
 import numpy as np
+import concurrent.futures
 
 def get_all(batch_start_ts=None, batch_end_ts=None):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
@@ -220,6 +221,27 @@ def process_business_logic(module_name, data):
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
+def process_batch(**kwargs):
+    """Function to be executed in a thread: Fetch, process, and update."""
+
+    batch_start_ts = kwargs.get("batch_start_ts")
+    batch_end_ts = kwargs.get("batch_end_ts")
+    domain = kwargs.get("domain")
+    solr_url = kwargs.get("solr_url")
+
+    logger.info(f"🔄 Processing batch: {batch_start_ts} → {batch_end_ts}")
+
+    data = get_all(batch_start_ts=batch_start_ts, batch_end_ts=batch_end_ts)
+    
+    if not data:
+        return True
+    
+    process_business_logic(module_name=f"business_logic.{domain}", data=data)
+    update_solr(arrow_table=data, solr_url=solr_url)
+
+    logger.info(f"✅ Batch {batch_start_ts} → {batch_end_ts} processed successfully.")
+    return True
+
 def process_index_override():
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
@@ -239,27 +261,46 @@ def process_index_override():
         # index_override table, which has a domain, a source timestamp and target timestamp.  It will batch
         # the load into day increments in the IDX_OVERRIDE_TIMESTEP_DAY_SIZE configuration.  The default is 7.
         # So this means it will fetch 7 days of data at a time until we reach the target timestamp.
+        # It will also use concurrent threadpool to run multiple batches at the same time.
         logger.info(f"🔄 Index override identified.")
         logger.info(f"🔄 We will batch from {configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS} to {configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS} "\
                     "in day increments of {configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE}")
         index_override_source_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_SOURCE_TS) 
         index_override_target_ts = result_dicts[0].get(configs.DB_FIELD_INDEX_OVERRIDE_TARGET_TS) 
+        
+        index_override_batch_source_ts = index_override_source_ts
         index_override_batch_target_ts = index_override_source_ts
 
-        while index_override_batch_target_ts <= index_override_target_ts:
-            # add the IDX_OVERRIDE_TIMESTEP_DAY_SIZE # of days for batching
-            index_override_batch_target_ts = index_override_source_ts + datetime.timedelta(days=int(configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE))
+        futures = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=int(configs.IDX_OVERRIDE_CONCURRENT_THREAD_COUNT)) as executor:
+            while index_override_batch_target_ts <= index_override_target_ts:
+                # Add the IDX_OVERRIDE_TIMESTEP_DAY_SIZE # of days for batching
+                index_override_batch_target_ts = index_override_batch_source_ts + datetime.timedelta(days=int(configs.IDX_OVERRIDE_TIMESTEP_DAY_SIZE))
 
-            logger.info(f"🔄 Processing batch: {index_override_source_ts} → {index_override_batch_target_ts}")
+                # params sent to process_batch
+                batch_params = {
+                    "batch_start_ts": index_override_batch_source_ts,
+                    "batch_end_ts": index_override_batch_target_ts,
+                    "domain": DOMAIN,
+                    "solr_url": solr_url,
+                }
+                # Submit batch processing task to the thread pool
+                future = executor.submit(process_batch, **batch_params)
+                futures.append(future)
 
-            # Fetch data for the batch range
-            data = get_all(batch_start_ts=index_override_source_ts, batch_end_ts=index_override_batch_target_ts)
-            process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
-            update_solr(arrow_table=data, solr_url=solr_url)
+                # Move to the next batch (set new source timestamp as the last processed target)
+                index_override_batch_source_ts = index_override_batch_target_ts
 
-            # Move to the next batch (set new source timestamp as the last processed target)
-            index_override_source_ts = index_override_batch_target_ts
+            # Wait for all threads to finish and collect results
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    if not result:
+                        logger.warning("⚠️ Some batch processing tasks failed.")
+                except Exception as e:
+                    logger.error(f"❌ Error processing batch: {e}")
 
+        logger.info("🎉 All batch processing tasks are complete.")
         # Archive record from index_override table
         call_statement = f"CALL {configs.DB_FUNC_CLEAN_INDEX_OVERRIDE}(%s)"
         params = (DOMAIN,)
