@@ -221,27 +221,6 @@ def process_business_logic(module_name, data):
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
 
-def process_batch(**kwargs):
-    """Function to be executed in a thread: Fetch, process, and update."""
-
-    batch_start_ts = kwargs.get("batch_start_ts")
-    batch_end_ts = kwargs.get("batch_end_ts")
-    domain = kwargs.get("domain")
-    solr_url = kwargs.get("solr_url")
-
-    logger.info(f"🔄 Processing batch: {batch_start_ts} → {batch_end_ts}")
-
-    data = get_all(batch_start_ts=batch_start_ts, batch_end_ts=batch_end_ts)
-    
-    if not data:
-        return True
-    
-    process_business_logic(module_name=f"business_logic.{domain}", data=data)
-    update_solr(arrow_table=data, solr_url=solr_url)
-
-    logger.info(f"✅ Batch {batch_start_ts} → {batch_end_ts} processed successfully.")
-    return True
-
 def process_index_override():
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
     try:
@@ -315,6 +294,28 @@ def process_index_override():
         cursor.close()
         conn.close()
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
+
+def process_batch(**kwargs):
+    """Function to be executed in a thread: Fetch, process, and update."""
+
+    batch_start_ts = kwargs.get("batch_start_ts")
+    batch_end_ts = kwargs.get("batch_end_ts")
+    domain = kwargs.get("domain")
+    solr_url = kwargs.get("solr_url")
+
+    logger.info(f"🔄 Processing batch: {batch_start_ts} → {batch_end_ts}")
+
+    data = get_all(batch_start_ts=batch_start_ts, batch_end_ts=batch_end_ts)
+    
+    if not data:
+        return True
+    
+    process_business_logic(module_name=f"business_logic.{domain}", data=data)
+    update_solr(arrow_table=data, solr_url=solr_url)
+
+    logger.info(f"✅ Batch {batch_start_ts} → {batch_end_ts} processed successfully.")
+    return True
+
 
 if __name__ == "__main__": 
     logger, config = bootstrap()
