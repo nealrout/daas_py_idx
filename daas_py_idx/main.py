@@ -145,9 +145,9 @@ def update_solr(arrow_table, solr_url):
     
 def process_all(solr_url):
     if not process_index_override():
-        data = get_all()
-        process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
-        update_solr(arrow_table=data, solr_url=solr_url)
+        arrow_table = get_all()
+        process_business_logic(module_name=f"business_logic.{DOMAIN}", data=arrow_table)
+        update_solr(arrow_table=arrow_table, solr_url=solr_url)
 
 def event_listener(solr_url):
     try:
