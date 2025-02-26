@@ -2,6 +2,7 @@ import psycopg2
 import datetime
 # from main import config
 import json
+import pandas as pd
 
 # configs = config.get_configs()
 
@@ -23,10 +24,13 @@ def setup_connection(config):
 def convert_timestamptz_to_date(record):
     for key, value in record.items():
         if isinstance(value, datetime.datetime):
-            # Convert to ISO 8601 format, ensuring UTC
-            # record[key] = value.astimezone(datetime.timezone.utc).isoformat()
-            # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
-            record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            if value is None or pd.isna(value) or value is pd.NaT: # Check if it's NaT
+                record[key] = None  # Or any placeholder like ''
+            else:
+                # Convert to ISO 8601 format, ensuring UTC
+                # record[key] = value.astimezone(datetime.timezone.utc).isoformat()
+                # Convert to UTC, remove microseconds beyond 3 decimals, and ensure 'Z' timezone format
+                record[key] = value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     return record
 
 # def convert_jsonb(value):
