@@ -51,7 +51,7 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
         arrow_table = pa.Table.from_pandas(df)
 
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -82,7 +82,7 @@ def get_by_id(notify_buffer):
         # Convert DataFrame to Arrow Table
         arrow_table = pa.Table.from_pandas(df)
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -98,7 +98,7 @@ def clean_event_notification_by_id(notify_buffer, channel_name):
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s, %s);", [json_data, channel_name])
         conn.commit()
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -139,7 +139,7 @@ def update_solr(arrow_table, solr_url):
         solr.add(solr_data)
         logger.info(f"{len(solr_data)} documents successfully updated in SOLR.")
     except Exception as e:
-        logger.error(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     
@@ -197,7 +197,7 @@ def event_listener(solr_url):
                     last_executed_time = time.time()
 
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         listener_conn.close()
         listener_cursor.close()
@@ -277,7 +277,7 @@ def process_index_override():
                     if not result:
                         logger.warning("⚠️ Some batch processing tasks failed.")
                 except Exception as e:
-                    logger.error(f"❌ Error processing batch: {e}")
+                    logger.exception(f"❌ Error processing batch: {e}")
 
         logger.info("🎉 All batch processing tasks are complete.")
         # Archive record from index_override table
@@ -289,7 +289,7 @@ def process_index_override():
         return True
 
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         DOMAIN = os.getenv("DOMAIN").upper().strip().replace("'", "")
 
     if DOMAIN == None:
-        logger.error(f"❌Cannot location DOMAIN: {args.domain.upper()}")
+        logger.exception(f"❌Cannot location DOMAIN: {args.domain.upper()}")
         sys.exit(1)
 
     SOLR_COLLECTION = getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")
