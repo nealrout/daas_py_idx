@@ -51,7 +51,7 @@ def get_all(batch_start_ts=None, batch_end_ts=None):
         arrow_table = pa.Table.from_pandas(df)
 
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -82,7 +82,7 @@ def get_by_id(notify_buffer):
         # Convert DataFrame to Arrow Table
         arrow_table = pa.Table.from_pandas(df)
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -98,7 +98,7 @@ def clean_event_notification_by_id(notify_buffer, channel_name):
         cursor.execute(f"SELECT * FROM {configs.DB_FUNC_CLEAN_EVENT_NOTIFICATION_BUFFER}(%s, %s);", [json_data, channel_name])
         conn.commit()
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -139,7 +139,7 @@ def update_solr(arrow_table, solr_url):
         solr.add(solr_data)
         logger.info(f"{len(solr_data)} documents successfully updated in SOLR.")
     except Exception as e:
-        logger.error(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error in {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         logger.debug(f"END {inspect.currentframe().f_code.co_name}")
     
@@ -150,59 +150,72 @@ def process_all(solr_url):
         update_solr(arrow_table=arrow_table, solr_url=solr_url)
 
 def event_listener(solr_url):
-    try:
-        listener_conn, listener_cursor = utilities.setup_connection(config=config)
-        listener_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+    retry_delay = int(configs.IDX_BUFFER_RETRY_SECONDS)
 
-        # reader_conn, reader_cursor = utilities.setup_connection(config=config)
+    while True:
+        try:
+            logger.info("🔄 Establishing connection to PostgreSQL...")
+            listener_conn, listener_cursor = utilities.setup_connection(config=config)
+            listener_conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
-        listener_cursor.execute(f"LISTEN {DB_CHANNEL};")
-        logger.info(f"Listening for {DB_CHANNEL} events...")
+            listener_cursor.execute(f"LISTEN {DB_CHANNEL};")
+            logger.info(f"✅ Listening for {DB_CHANNEL} events...")
 
-        notify_buffer = []
-        last_executed_time = time.time()
+            notify_buffer = []
+            last_executed_time = time.time()
 
-        # Recover updates made while this service was not running
-        logger.info(f"Recovering buffered events before enabling listener")
-        listener_cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
-        buffered_event_data = listener_cursor.fetchall()
-        
-        logger.debug(f"{len(buffered_event_data)} records received on channel {DB_CHANNEL} from {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}")
+            # Recover buffered events from the DB
+            logger.info(f"Recovering buffered events before enabling listener")
+            listener_cursor.execute(f"SELECT * FROM {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}(%s);", [DB_CHANNEL])
+            buffered_event_data = listener_cursor.fetchall()
 
-        for event in buffered_event_data:
-            notification_id, channel, payload, *extra_columns = event
+            logger.debug(f"{len(buffered_event_data)} records received from {configs.DB_FUNC_GET_EVENT_NOTIFICATION_BUFFER}")
 
-            logger.debug(f"notification_id: {notification_id}, channel: {channel}, payload: {payload}")
-            notify_buffer.append(payload)
+            for event in buffered_event_data:
+                notification_id, channel, payload, *extra_columns = event
+                logger.debug(f"📥 Buffered event - ID: {notification_id}, Channel: {channel}, Payload: {payload}")
+                notify_buffer.append(payload)
 
-        while True:
-            listener_conn.poll()
-            while listener_conn.notifies:
-                notify = listener_conn.notifies.pop(0)
-                logger.debug(f"🔔 {DB_CHANNEL} Change Detected: {notify.payload} 🔔")
-                notify_buffer.append(notify.payload)
+            # Main event listening loop
+            while True:
+                listener_conn.poll()
+                while listener_conn.notifies:
+                    notify = listener_conn.notifies.pop(0)
+                    logger.debug(f"🔔 {DB_CHANNEL} Change Detected: {notify.payload} 🔔")
+                    notify_buffer.append(notify.payload)
 
-            if len(notify_buffer) > int(IDX_BUFFER_SIZE) or (time.time() - last_executed_time >= int(IDX_BUFFER_DURATION)):
-                if notify_buffer:
+                # Process buffered events periodically or when buffer size exceeds limit
+                if len(notify_buffer) > int(IDX_BUFFER_SIZE) or (time.time() - last_executed_time >= int(IDX_BUFFER_DURATION)):
+                    if notify_buffer:
+                        data = get_by_id(notify_buffer=notify_buffer)
+                        process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
+                        update_solr(arrow_table=data, solr_url=solr_url)
 
-                    data = get_by_id(notify_buffer=notify_buffer)
-                    process_business_logic(module_name=f"business_logic.{DOMAIN}", data=data)
-                    update_solr(arrow_table=data, solr_url=solr_url)
+                        # Remove processed events from the buffer
+                        clean_event_notification_by_id(notify_buffer=notify_buffer, channel_name=DB_CHANNEL)
 
-                    # remove items from event_notification_buffer
-                    clean_event_notification_by_id(notify_buffer=notify_buffer, channel_name=DB_CHANNEL)
+                        notify_buffer.clear()
+                        last_executed_time = time.time()
 
-                    # Reset tracking variables
-                    notify_buffer.clear()
-                    last_executed_time = time.time()
+        except psycopg2.OperationalError as e:
+            logger.error(f"❌ Database connection lost: {e}")
+            logger.info(f"⏳ Retrying connection in {retry_delay} seconds...")
+            time.sleep(retry_delay)  # Wait before retrying
 
-    except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
-    finally:
-        listener_conn.close()
-        listener_cursor.close()
-        # reader_conn.close()
-        # reader_cursor.close()
+        except Exception as e:
+            logger.exception(f"❌ Unexpected error in {inspect.currentframe().f_code.co_name}: {e}")
+            logger.info(f"⏳ Retrying connection in {retry_delay} seconds...")
+            time.sleep(retry_delay)  # Wait before retrying
+
+        finally:
+            try:
+                if listener_cursor:
+                    listener_cursor.close()
+                if listener_conn:
+                    listener_conn.close()
+                logger.info("🔌 Closed database connection. Reconnecting...")
+            except Exception as cleanup_error:
+                logger.error(f"⚠️ Error while closing DB connection: {cleanup_error}")
 
 def process_business_logic(module_name, data):
     logger.debug(f"BEGIN {inspect.currentframe().f_code.co_name}")
@@ -277,7 +290,7 @@ def process_index_override():
                     if not result:
                         logger.warning("⚠️ Some batch processing tasks failed.")
                 except Exception as e:
-                    logger.error(f"❌ Error processing batch: {e}")
+                    logger.exception(f"❌ Error processing batch: {e}")
 
         logger.info("🎉 All batch processing tasks are complete.")
         # Archive record from index_override table
@@ -289,7 +302,7 @@ def process_index_override():
         return True
 
     except Exception as e:
-        logger.error(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
+        logger.exception(f"❌Error {inspect.currentframe().f_code.co_name}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -333,7 +346,7 @@ if __name__ == "__main__":
         DOMAIN = os.getenv("DOMAIN").upper().strip().replace("'", "")
 
     if DOMAIN == None:
-        logger.error(f"❌Cannot location DOMAIN: {args.domain.upper()}")
+        logger.exception(f"❌Cannot location DOMAIN: {args.domain.upper()}")
         sys.exit(1)
 
     SOLR_COLLECTION = getattr(configs, f"SOLR_COLLECTION_{DOMAIN}")
